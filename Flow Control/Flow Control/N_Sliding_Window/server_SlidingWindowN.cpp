@@ -1,0 +1,496 @@
+#include <iostream>
+#include <sstream>//istringstream
+#include <string>
+#include <vector>
+#include <iterator>
+#include <sys/sendfile.h>//sendfile()
+#include <sys/stat.h> 
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <algorithm>
+#include <arpa/inet.h>
+#include <unistd.h>
+#include <string.h>
+#include <time.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <cstdio>
+#include <fstream>
+
+
+
+using namespace std;
+
+
+
+int RandomNumberGenerator(int i)
+{
+	return rand() % i;
+}
+
+
+/*
+void ArrayXOR(int *a, int *b)
+{
+	for(int i=0;i<17;i++)
+		a[i] = a[i] ^ b[i];
+}*/
+void ArrayXOR(int *a, int *b, int start, int len)
+{
+	for(int i=start;i<len;i++)
+		*(a+i) = *(a+i)^*(b+i);//a[i] = a[i] ^ b[i];
+}
+
+
+
+void CRC16(int *a, int *remainder)
+{
+	int divisor[17]={1,1,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1};
+	int temp[17]={0};
+	int len = 17;
+
+	memset(remainder,0,16*4);
+	
+	cout<<"Received message."<<endl;
+	for(int j=1;j<33;j++)
+		cout<<a[j]<<" ";
+	
+	cout<<endl;
+	
+	copy(a+1,a+18,temp);
+	
+/*	cout<<"Temp Original."<<endl;
+	for(int j=0;j<17;j++)
+		cout<<temp[j]<<" ";
+*/	
+//	cout<<endl;
+	
+	while(len < 32)
+	{
+		
+		if(temp[0] == 1)
+		{
+			ArrayXOR(temp,divisor,0,17);
+			
+			rotate(temp,temp+1,temp+17);//Algorithm header
+				
+			temp[16] = a[len+1];
+			
+/*			cout<<"next bit :- "<<a[len+1]<<endl;	
+			
+			cout<<"temp loop "<<len-16<<" :- "<<endl;
+			
+			for(int i=0;i<17;i++)
+				cout<<temp[i]<<(i!=16?" ":"\n");
+*/			
+		}	
+		else
+		{
+//			int t[27] = {0};
+			
+//			ArrayXOR(temp,t);
+			
+			rotate(temp,temp+1,temp+17);//Algorithm header
+				
+			temp[16] = a[len+1];
+			
+/*			cout<<"temp loop "<<len-16<<" :- "<<endl;
+			
+			for(int i=0;i<17;i++)
+				cout<<temp[i]<<(i!=16?" ":"\n");
+*/		}
+		
+		len += 1;
+		
+	}
+	
+/*	cout<<"temp after loop :- "<<endl;
+	for(int i=0;i<17;i++)
+		cout<<temp[i]<<(i!=16?" ":"\n");
+*/
+	if(temp[0] == 1)
+	{
+		ArrayXOR(temp,divisor,0,17);
+		
+		copy(temp+1,temp+17,remainder);
+	}	
+	else
+	{
+		copy(temp+1,temp+17,remainder);
+	}
+	
+//	ArrayXOR(dividend+17,remainder,0,16);
+
+	cout<<"remainder is :- "<<endl;
+	for(int j=0;j<16;j++)
+		cout<<remainder[j]<<" ";
+		
+	cout<<endl;	
+
+}
+
+
+
+int sum(int *a,int size)
+{
+	int s=0;
+
+	for(int i=0;i<size;i++)
+		s += a[i];
+
+	return s;
+}	
+
+
+
+int main(int argc, char **argv)
+{
+	if(argc != 2)
+	{
+		cout<<"Usage syntax: ./server <port_no>"<<endl;
+		return 0;
+	}
+	
+	int serverSocketId;
+	
+	serverSocketId = socket(PF_INET, SOCK_STREAM, 0);
+	
+	if(serverSocketId == -1)
+	{
+		perror("The following error occurred");	
+		return -1;
+	}
+	else
+		cout<<"Socket successfully created."<<endl;
+
+
+	
+	struct sockaddr_in serverSocket;
+	
+	serverSocket.sin_family = AF_INET;
+	serverSocket.sin_port = htons(atoi(argv[1]));
+	serverSocket.sin_addr.s_addr = INADDR_ANY;
+	memset(serverSocket.sin_zero,0,sizeof(serverSocket.sin_zero));	
+	
+	
+	
+	//Bindig the Socket to a port
+	int temp = bind(serverSocketId, (struct sockaddr *)&serverSocket, sizeof(struct sockaddr));
+
+	if(temp == -1)
+	{
+		perror("The following error occurred");	
+		return -1;
+	}
+	else
+		cout << "Server started running at "<< inet_ntoa(serverSocket.sin_addr)  << ":" << argv[1] << endl;
+
+
+
+	//Listen to the port
+	temp = listen(serverSocketId, 10);
+
+	if(temp == -1)
+	{
+		perror("The following error occurred");	
+		return -1;
+	}
+
+	struct sockaddr clientSocket;
+	socklen_t addrlen = sizeof(clientSocket);
+
+	int clientSocketId = accept(serverSocketId, (struct sockaddr *)&clientSocket, &addrlen);//?Doubt if it will work or no
+
+	if(clientSocketId == -1)
+	{
+		perror("The following error occurred");	
+		return -1;
+	}
+	else
+		cout<<"Connection accepted."<<endl;
+	
+//############################################################################################################################
+
+	int token = 2;//Current frame number in receiver window 
+	ofstream f("output.txt");
+	int packetCount = 0;
+/*	char ack0[] = "ACK0";
+	char ack1[] = "ACK1";
+	char ack2[] = "ACK2";
+	char sack0[] = "ACK0S";
+	char sack1[] = "ACK1S";
+	char sack2[] = "ACK2S";
+	char sdack0[] = "ACK0SD";
+	char sdack1[] = "ACK1SD";
+	char sdack2[] = "ACK2SD";
+	char dack0[] = "ACK0D";
+	char dack1[] = "ACK1D";
+	char dack2[] = "ACK2D";
+	char nack[] = "NACK";
+	char dnack[] = "NACKD";
+*/
+	const char *ack[] = {"ACK0","ACK1","ACK2"};
+	const char *sack[] = {"ACK0S","ACK1S","ACK2S"};
+	const char *sdack[] = {"ACK0SD","ACK1SD","ACK2SD"};
+	const char *dack[] = {"ACK0D","ACK1D","ACK2D"};
+	const char *nack[] = {"NACK0","NACK1","NACK2"};
+	const char *snack[] = {"NACK0S","NACK1S","NACK2S"};
+	const char *sdnack[] = {"NACK0SD","NACK1SD","NACK2SD"};
+	const char *dnack[] = {"NACK0D","NACK1D","NACK2D"};
+
+
+	while(packetCount < 4)//8)
+	{
+		int received_int[33]={0};
+
+		temp = read(clientSocketId, received_int, sizeof(received_int));
+		
+		cout<<"(First Frame)Received frame token No. :- "<<received_int[0]<<"   For Packet :- "<<packetCount+1<<endl;
+		
+		
+/*		cout<<"Received Message :-"<<endl;
+		for(int i=0;i<33;i++)
+			cout<<received_int[i]<<(i!=32)?" ":"\n";
+*/		
+		if(temp == -1)
+		{
+			cout<<"Data could not be received :"<<endl;
+			perror("The following error occurred");	
+		}
+		else if(temp == 0)
+			cout<<"Connection closed by server."<<endl;
+
+		int delay = RandomNumberGenerator(2);
+		int drop = RandomNumberGenerator(2);
+
+		//If the received frame number is not the same present in the window 
+		if(received_int[0] != token )
+		{
+			//If the received frame number is the expected one(helps in checking if the first was dropped or not)
+			if(received_int[0] == (token+1)%3)
+			{
+				int remainder[16]={0};
+
+				CRC16(received_int, remainder);
+		
+				int s = sum(remainder, 16);
+				
+				//First Frame
+				//No error present in the received message
+				//Checks the second frame only if the first frame is free of error and of the correct order
+				if(s == 0)
+				{
+					packetCount++;
+					
+					//Updates the window with the last accepted frame number
+					token = received_int[0];
+				
+					//OUTPUT THE RECEIVED INTEGER ARRAY INTO A FILE
+					for(int i=0;i<16;i++)
+							f<<received_int[i+1]<<" ";
+		
+					memset(received_int,0,33*4);
+					
+					temp = read(clientSocketId, received_int, sizeof(received_int));
+		
+					cout<<"(Second Frame)Received frame token No. :- "<<received_int[0]<<endl;
+		
+					if(temp == -1)
+					{
+						cout<<"Data could not be received :"<<endl;
+						perror("The following error occurred");	
+					}
+					else if(temp == 0)
+						cout<<"Connection closed by server."<<endl;
+
+					memset(remainder,0,16*4);
+
+					CRC16(received_int, remainder);
+		
+					s = sum(remainder, 16);
+					
+					//Second Frame
+					//No error present in the message
+					if(s == 0)
+					{
+						packetCount++;
+					
+						//OUTPUT THE RECEIVED INTEGER ARRAY INTO A FILE
+						for(int i=0;i<16;i++)
+							f<<received_int[i+1]<<" ";
+					
+						//Updates the window with the last accepted frame number	
+						token = received_int[0];	
+
+						if(!drop)
+						{
+							if(delay)
+							{
+								cout<<"ACK Delayed for packet : "<<packetCount+1<<endl;
+					
+								usleep(3250000);
+					
+								temp = send(clientSocketId, dack[(token+1)%3], sizeof( dack[(token+1)%3] ), 0);							
+							}
+							else
+							{
+								temp = send(clientSocketId, ack[(token+1)%3], sizeof( ack[(token+1)%3] ), 0);
+							}
+					
+							if(temp == -1)
+							{
+								perror("The following error occurred");	
+								return -1;
+							}
+							else
+								cout<<"Sent ACK"<<(token+1)%3<<" for packet : "<<packetCount+1<<"\nsent : "<<temp<<" bytes."<<endl;
+						}		
+
+					}
+					else//If their is an error in the second frame
+					{
+						if(!drop)
+						{
+							if(delay)
+							{
+								cout<<"NACK Delayed for packet : "<<packetCount+1<<endl;
+					
+								usleep(3150000);
+						
+								temp = send(clientSocketId, dnack[received_int[0]], sizeof( dnack[received_int[0]] ), 0);
+							}
+							else
+								temp = send(clientSocketId, nack[received_int[0]], sizeof( nack[received_int[0]] ), 0);
+
+							if(temp == -1)
+							{
+								perror("The following error occurred");	
+								return -1;
+							}
+							else
+								cout<<"Sent NACK"<<received_int[0]<<" for packet "<<packetCount+1<<"\nsent : "<<temp<<" bytes."<<endl;
+						}
+						else
+							cout<<"NACK"<<received_int[0]<<" Dropped for packet : "<<packetCount+1<<endl;
+					}
+				}
+				else//If their is an error in the first frame
+				{
+					if(!drop)
+					{
+						if(delay)
+						{
+							cout<<"NACK Delayed for packet : "<<packetCount+1<<endl;
+					
+							usleep(3150000);
+						
+							temp = send(clientSocketId, dnack[received_int[0]], sizeof( dnack[received_int[0]] ), 0);
+						}
+						else
+							temp = send(clientSocketId, nack[received_int[0]], sizeof( nack[received_int[0]] ), 0);
+
+						if(temp == -1)
+						{
+							perror("The following error occurred");	
+							return -1;
+						}
+						else
+							cout<<"Sent NACK"<<received_int[0]<<" for packet "<<packetCount+1<<"\nsent : "<<temp<<" bytes."<<endl;
+					}
+					else
+						cout<<"NACK"<<received_int[0]<<" Dropped for packet : "<<packetCount+1<<endl;	
+				}
+			
+			}
+			else//If the received frame number is not the expected one
+			{	
+				if(!drop)
+				{
+					if(delay)
+					{
+						cout<<"NACK"<<(token+1)%3<<" Delayed for packet : "<<packetCount+1<<endl;
+					
+						usleep(3150000);
+						
+						temp = send(clientSocketId, dnack[(token+1)%3], sizeof( dnack[(token+1)%3] ), 0);
+					}
+					else
+						temp = send(clientSocketId, nack[(token+1)%3], sizeof( nack[(token+1)%3] ), 0);
+
+					if(temp == -1)
+					{
+						perror("The following error occurred");	
+						return -1;
+					}
+					else
+						cout<<"Sent NACK"<<(token+1)%3<<" for packet "<<packetCount+1<<"\nsent : "<<temp<<" bytes."<<endl;
+				}
+				else
+					cout<<"NACK"<<(token+1)%3<<" Dropped for packet : "<<packetCount+1<<endl;	
+			}
+
+		}
+		else//If the received frame number is same as one present in the window
+		{
+			if(!drop)
+			{
+				if(delay)
+				{
+					/*cout<<"ACK Delayed for packet : "<<packetCount+1<<endl;
+				
+					usleep(3150000);
+				
+					temp = send(clientSocketId, sdack[(token+1)%3], sizeof( sdack[(token+1)%3] ), 0);*/
+					
+					cout<<"NACK Delayed for packet : "<<packetCount+1<<endl;
+				
+					usleep(3150000);
+				
+					temp = send(clientSocketId, sdnack[(token+1)%3], sizeof( sdnack[(token+1)%3] ), 0);
+					
+				}
+				else
+				{
+					//temp = send(clientSocketId, sack[(token+1)%3], sizeof( sack[(token+1)%3] ), 0);
+					temp = send(clientSocketId, snack[(token+1)%3], sizeof( snack[(token+1)%3] ), 0);
+				}
+				
+				
+				if(temp == -1)
+				{
+					perror("The following error occurred");	
+					return -1;
+				}
+				else if(temp > 0)
+				{
+					cout<<"(Received same frame)Sent NACK"<<(token+1)%3<<" for packet : "<<packetCount+1<<"\nsent : "
+						<<temp<<" bytes."<<endl;
+				}
+			}
+			else
+				cout<<"NACK"<<(token+1)%3<<" Dropped for packet : "<<packetCount+1<<endl;
+		}
+		
+
+
+		cout<<endl<<endl<<endl;
+	}
+	
+	char recAck[] = "Received Message";
+	temp = send(clientSocketId, recAck, sizeof(recAck), 0);
+	
+	if(temp == -1)
+	{
+		perror("The following error occurred");	
+		return -1;
+	}
+	else
+		cout<<"Sent Full Message Acknoledgement."<<endl;
+
+	close(clientSocketId);
+	
+	return 0;
+	
+}
